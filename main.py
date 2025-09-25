@@ -113,11 +113,10 @@ def memory_test():
     print(f"Memory: {slow_memory / 1024**2:.1f}MB -> {fast_memory / 1024**2:.1f}MB (ratio: {fast_memory / slow_memory:.2f})")
 
 def main():
-    correctness_ok = test_correctness()
-    if correctness_ok:
-        benchmark_speed()
-        test_gradients()
-        memory_test()
+    test_correctness()
+    benchmark_speed()
+    test_gradients()
+    memory_test()
 
 if __name__ == "__main__":
     main()
