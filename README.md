@@ -7,6 +7,10 @@ The only notable thing is in `modeling/TverskyLayer.py` and it's pretty simple.
 To run the vectorized difference test in main.py, simply
 
 ```python
-uv python run main.py
+uv run python main.py
 ```
 
+XOR Test similar to the paper:
+```python
+uv run python XORtest.py
+```
