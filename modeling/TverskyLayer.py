@@ -3,14 +3,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TverskyLayer(nn.Module):
-    def __init__(self, input_dim: int, num_prototypes: int, num_features: int):
+    def __init__(self, input_dim: int, num_prototypes: int, num_features: int, initialize: False):
         super().__init__()
 
-        self.features = nn.Parameter(torch.randn(num_features, input_dim))  # Feature bank
-        self.prototypes = nn.Parameter(torch.randn(num_prototypes, input_dim))  # Prototypes
-        self.alpha = nn.Parameter(torch.ones(1))  # scale for a_distinctive
-        self.beta = nn.Parameter(torch.ones(1))   # Scale for b_distinctive
-        self.theta = nn.Parameter(torch.ones(1))  # General scale
+        self.features = nn.Parameter(torch.empty(num_features, input_dim))  # Feature bank
+        self.prototypes = nn.Parameter(torch.empty(num_prototypes, input_dim))  # Prototypes
+        self.alpha = nn.Parameter(torch.zeros(1))  # scale for a_distinctive
+        self.beta = nn.Parameter(torch.zeros(1))   # Scale for b_distinctive
+        self.theta = nn.Parameter(torch.zeros(1))  # General scale
+
+        if initialize:
+            self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.uniform_(self.features, -.27, 1)
+        torch.nn.init.uniform_(self.prototypes, -.27, 1)
+
+        # Recommended by paper
+        #torch.nn.init.uniform_(self.alpha, 0, 2)
+        #torch.nn.init.uniform_(self.beta, 0, 2)
+        #torch.nn.init.uniform_(self.theta, 0, 2)
 
     # Use the vectorized method in forward, this is here for example only.
     def tversky_similarity(self, a, b):
