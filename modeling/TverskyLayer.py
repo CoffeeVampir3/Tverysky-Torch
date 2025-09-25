@@ -19,8 +19,8 @@ class TverskyLayer(nn.Module):
         b_features = b @ self.features.T  # [batch, num_features]
 
         # Binary presence: feature is "present" if activation > 0
-        a_present = (a_features > 0).float()
-        b_present = (b_features > 0).float()
+        a_present = torch.sigmoid(a_features)
+        b_present = torch.sigmoid(b_features)
 
         # Set operations
         both_present = a_present * b_present  # A ∩ B
