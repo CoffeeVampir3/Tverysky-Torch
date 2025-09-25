@@ -1,4 +1,4 @@
-This has an implementation of the Tversky Layer that replaces linears as outlined by https://arxiv.org/pdf/2506.11035
+This has an implementation of the Tversky Layer that replaces linears as outlined by the excellent paper: https://arxiv.org/pdf/2506.11035
 
 Included in the TveryskyLayer.py is two versions, a `forward_bad_slow` and accompanying `tversky_similarity` which should only be used as conceptual examples. Use the regular `forward` which has been vectorized in practice.
 
@@ -9,3 +9,4 @@ To run the vectorized difference test in main.py, simply
 ```python
 uv python run main.py
 ```
+
