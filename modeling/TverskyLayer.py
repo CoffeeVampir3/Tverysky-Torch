@@ -19,8 +19,8 @@ class TverskyLayer(nn.Module):
         b_features = b @ self.features.T  # [batch, num_features]
 
         # Binary presence: feature is "present" if activation > 0
-        a_present = torch.sigmoid(a_features)
-        b_present = torch.sigmoid(b_features)
+        a_present = torch.nn.functional.relu(a_features)
+        b_present = torch.nn.functional.relu(b_features)
 
         # Set operations
         both_present = a_present * b_present  # A ∩ B
@@ -60,8 +60,8 @@ class TverskyLayer(nn.Module):
         p_features = torch.einsum('bpi,fi->bpf', proto_expanded, self.features)  # [batch, num_prototypes, num_features]
 
         # Differentiable presence masks, not sure if this is what the paper intended.
-        x_present = torch.sigmoid(x_features)
-        p_present = torch.sigmoid(p_features)
+        x_present = torch.nn.functional.relu(x_features)
+        p_present = torch.nn.functional.relu(p_features)
 
         # Set operations
         both_present = x_present * p_present  # A ∩ B
