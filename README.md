@@ -1,3 +1,5 @@
+[![Discord](https://img.shields.io/discord/232596713892872193?logo=discord)](https://discord.gg/2JhHVh7CGu)
+
 This has an implementation of the Tversky Layer that replaces linears as outlined by the excellent paper: https://arxiv.org/pdf/2506.11035
 
 Included in the TveryskyLayer.py is two versions, a `forward_bad_slow` and accompanying `tversky_similarity` which should only be used as conceptual examples. Use the regular `forward` which has been vectorized in practice.
@@ -23,3 +25,4 @@ Features: 8 | Accuracy: 0.900±0.137 | Convergence: 0.600
 Features: 16 | Accuracy: 0.900±0.137 | Convergence: 0.600
 Features: 32 | Accuracy: 0.950±0.112 | Convergence: 0.800
 ```
+
