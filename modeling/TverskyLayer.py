@@ -71,7 +71,7 @@ class TverskyLayer(nn.Module):
         x_features = torch.einsum('bpi,fi->bpf', x_expanded, self.features)  # [batch, num_prototypes, num_features]
         p_features = torch.einsum('bpi,fi->bpf', proto_expanded, self.features)  # [batch, num_prototypes, num_features]
 
-        # Differentiable presence masks, not sure if this is what the paper intended.
+        # a · fk > 0
         x_present = torch.nn.functional.relu(x_features)
         p_present = torch.nn.functional.relu(p_features)
 
