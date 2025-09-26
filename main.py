@@ -7,7 +7,7 @@ from modeling.TverskyLayer import TverskyLayer
 def test_correctness():
     torch.manual_seed(42)
     batch_size, input_dim, num_prototypes, num_features = 10, 32*32, 5, 12
-    layer = TverskyLayer(input_dim, num_prototypes, num_features)
+    layer = TverskyLayer(input_dim, num_prototypes, num_features, True)
     x = torch.randn(batch_size, input_dim)
 
     with torch.no_grad():
@@ -29,7 +29,7 @@ def benchmark_speed():
 
     for batch_size, input_dim, num_prototypes, num_features in configs:
         torch.manual_seed(42)
-        layer = TverskyLayer(input_dim, num_prototypes, num_features)
+        layer = TverskyLayer(input_dim, num_prototypes, num_features, True)
         x = torch.randn(batch_size, input_dim)
 
         if torch.cuda.is_available():
@@ -63,8 +63,8 @@ def benchmark_speed():
 def test_gradients():
     torch.manual_seed(42)
     input_dim, num_prototypes, num_features = 4, 3, 6
-    layer1 = TverskyLayer(input_dim, num_prototypes, num_features)
-    layer2 = TverskyLayer(input_dim, num_prototypes, num_features)
+    layer1 = TverskyLayer(input_dim, num_prototypes, num_features, True)
+    layer2 = TverskyLayer(input_dim, num_prototypes, num_features, True)
     layer2.load_state_dict(layer1.state_dict())
 
     x = torch.randn(5, input_dim, requires_grad=True)
@@ -95,7 +95,7 @@ def memory_test():
 
     torch.cuda.empty_cache()
     batch_size, input_dim, num_prototypes, num_features = 256, 128, 100, 200
-    layer = TverskyLayer(input_dim, num_prototypes, num_features).cuda()
+    layer = TverskyLayer(input_dim, num_prototypes, num_features, True).cuda()
     x = torch.randn(batch_size, input_dim).cuda()
 
     torch.cuda.empty_cache()
