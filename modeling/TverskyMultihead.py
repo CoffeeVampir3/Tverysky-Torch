@@ -39,7 +39,7 @@ def tversky_multihead_similarity(x, features, prototypes, theta, alpha, beta, n_
 
         result[:, start_idx:end_idx] = head_result
 
-    return result
+    return result # [batch_size, total_prototypes]
 
 class TverskyMultihead(nn.Module):
     def __init__(self, hidden_dim: int, n_heads: int, num_prototypes: int, num_features: int):
