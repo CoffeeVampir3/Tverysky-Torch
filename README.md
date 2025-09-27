@@ -26,7 +26,7 @@ Features: 16 | Accuracy: 0.900±0.137 | Convergence: 0.600
 Features: 32 | Accuracy: 0.950±0.112 | Convergence: 0.800
 ```
 
-Not present in the paper is an experimental TverskyMultihead. This reduces the prototypes into chunks so each "head" is responsible for a subgroup of prototypes. This maintains the ability to do XOR. Conceptually this should be used to reduce the size of the TverskyLayer without killing its ability to XOR. To test it on XOR:
+Not present in the paper is an experimental TverskyMultihead. This reduces the prototypes into chunks so each "head" is responsible for a subgroup of prototypes.  So 2 heads with 20 prototypes is 10 distinct prototypes per head. This maintains the ability to do XOR. This lets you increase the feature size but still keep the calculation tractable by subdividing over prototypes.
 
 ```python
 uv run python XORTest-Multihead.py
