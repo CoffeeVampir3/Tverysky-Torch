@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 class TverskyLayer(nn.Module):
     def __init__(self, input_dim: int, num_prototypes: int, num_features: int, initialize: False):
@@ -11,6 +12,9 @@ class TverskyLayer(nn.Module):
         self.alpha = nn.Parameter(torch.zeros(1))  # scale for a_distinctive
         self.beta = nn.Parameter(torch.zeros(1))   # Scale for b_distinctive
         self.theta = nn.Parameter(torch.zeros(1))  # General scale
+
+        self.register_buffer('cached_matrix', None)
+        self.register_buffer('cached_proto_sum', None)
 
         if initialize:
             self.reset_parameters()
@@ -59,6 +63,39 @@ class TverskyLayer(nn.Module):
 
         return torch.stack(similarities, dim=1)  # [batch, num_prototypes]
 
+    def forward(self, x):
+        x_features = x @ self.features.T
+        x_present = F.softplus(x_features, beta=10)
+        x_weighted = x_features * x_present
+
+        if self.training:
+            proto_features = self.prototypes @ self.features.T
+            proto_present = F.softplus(proto_features, beta=10)
+            proto_weighted = proto_features * proto_present
+            proto_sum = proto_weighted.sum(dim=1)
+
+            fused_matrix = (self.theta + self.beta) * proto_weighted - self.alpha * proto_present
+        else:
+            if self.cached_matrix is None:
+                with torch.no_grad():
+                    proto_features = self.prototypes @ self.features.T
+                    proto_present = F.softplus(proto_features, beta=10)
+                    proto_weighted = proto_features * proto_present
+                    self.cached_proto_sum = proto_weighted.sum(dim=1)
+                    self.cached_matrix = (self.theta + self.beta) * proto_weighted - self.alpha * proto_present
+
+            fused_matrix = self.cached_matrix
+            proto_sum = self.cached_proto_sum
+
+        result = x_weighted @ fused_matrix.T
+
+        x_sum = rearrange(x_weighted.sum(dim=1), 'b -> b 1')
+        proto_sum_broadcast = rearrange(proto_sum, 'p -> 1 p')
+
+        result = result - self.alpha * x_sum - self.beta * proto_sum_broadcast
+
+        return result # [batch, num_prototypes]
+
     # Original fast forward, has intermediates that are too large to be practical
     # def forward(self, x):
     #     batch_size, input_dim = x.shape
@@ -90,43 +127,43 @@ class TverskyLayer(nn.Module):
     #     return self.theta * common - self.alpha * x_distinctive - self.beta * p_distinctive
 
     # Faster version, we need to then chunk this over the prototype dimension but this is much better.
-    def forward(self, x):
-        batch_size = x.shape[0]
+    # def forward(self, x):
+    #     batch_size = x.shape[0]
 
-        x_features = torch.matmul(x, self.features.T)  # [batch, features]
-        p_features = torch.matmul(self.prototypes, self.features.T)  # [prototypes, features]
-        x_present = F.relu(x_features)  # [batch, features]
-        p_present = F.relu(p_features)  # [prototypes, features]
+    #     x_features = torch.matmul(x, self.features.T)  # [batch, features]
+    #     p_features = torch.matmul(self.prototypes, self.features.T)  # [prototypes, features]
+    #     x_present = F.relu(x_features)  # [batch, features]
+    #     p_present = F.relu(p_features)  # [prototypes, features]
 
-        # Reformulated to avoid materializing large tensors:
-        # Original: (x_features * p_features * both_present).sum(dim=2)
-        # where both_present = x_present * p_present (broadcasted to [batch, prototypes, features])
-        # Equivalent: sum_f(x_features[f] * p_features[f] * x_present[f] * p_present[f])
-        # = sum_f((x_features[f] * x_present[f]) * (p_features[f] * p_present[f]))
-        # = (x_features * x_present) @ (p_features * p_present).T
+    #     # Reformulated to avoid materializing large tensors:
+    #     # Original: (x_features * p_features * both_present).sum(dim=2)
+    #     # where both_present = x_present * p_present (broadcasted to [batch, prototypes, features])
+    #     # Equivalent: sum_f(x_features[f] * p_features[f] * x_present[f] * p_present[f])
+    #     # = sum_f((x_features[f] * x_present[f]) * (p_features[f] * p_present[f]))
+    #     # = (x_features * x_present) @ (p_features * p_present).T
 
-        x_weighted = x_features * x_present  # [batch, features]
-        p_weighted = p_features * p_present  # [prototypes, features]
-        common = torch.matmul(x_weighted, p_weighted.T)  # [batch, prototypes]
+    #     x_weighted = x_features * x_present  # [batch, features]
+    #     p_weighted = p_features * p_present  # [prototypes, features]
+    #     common = torch.matmul(x_weighted, p_weighted.T)  # [batch, prototypes]
 
-        # Original: (x_features * x_only).sum(dim=2)
-        # where x_only = x_present * (1 - p_present) (broadcasted)
-        # = sum_f(x_features[f] * x_present[f] * (1 - p_present[f]))
-        # = sum_f(x_features[f] * x_present[f]) - sum_f(x_features[f] * x_present[f] * p_present[f])
-        # = x_weighted.sum(1) - (x_weighted @ p_present.T)
+    #     # Original: (x_features * x_only).sum(dim=2)
+    #     # where x_only = x_present * (1 - p_present) (broadcasted)
+    #     # = sum_f(x_features[f] * x_present[f] * (1 - p_present[f]))
+    #     # = sum_f(x_features[f] * x_present[f]) - sum_f(x_features[f] * x_present[f] * p_present[f])
+    #     # = x_weighted.sum(1) - (x_weighted @ p_present.T)
 
-        x_weighted_sum = x_weighted.sum(dim=1, keepdim=True)  # [batch, 1]
-        x_p_interaction = torch.matmul(x_weighted, p_present.T)  # [batch, prototypes]
-        x_distinctive = x_weighted_sum - x_p_interaction  # [batch, prototypes]
+    #     x_weighted_sum = x_weighted.sum(dim=1, keepdim=True)  # [batch, 1]
+    #     x_p_interaction = torch.matmul(x_weighted, p_present.T)  # [batch, prototypes]
+    #     x_distinctive = x_weighted_sum - x_p_interaction  # [batch, prototypes]
 
-        # Original: (p_features * p_only).sum(dim=2)
-        # where p_only = p_present * (1 - x_present) (broadcasted)
-        # = sum_f(p_features[f] * p_present[f] * (1 - x_present[f]))
-        # = sum_f(p_features[f] * p_present[f]) - sum_f(p_features[f] * p_present[f] * x_present[f])
-        # = p_weighted.sum(1) - (x_present @ p_weighted.T)
+    #     # Original: (p_features * p_only).sum(dim=2)
+    #     # where p_only = p_present * (1 - x_present) (broadcasted)
+    #     # = sum_f(p_features[f] * p_present[f] * (1 - x_present[f]))
+    #     # = sum_f(p_features[f] * p_present[f]) - sum_f(p_features[f] * p_present[f] * x_present[f])
+    #     # = p_weighted.sum(1) - (x_present @ p_weighted.T)
 
-        p_weighted_sum = p_weighted.sum(dim=1).unsqueeze(0)  # [1, prototypes]
-        x_p_weighted_interaction = torch.matmul(x_present, p_weighted.T)  # [batch, prototypes]
-        p_distinctive = p_weighted_sum - x_p_weighted_interaction  # [batch, prototypes]
+    #     p_weighted_sum = p_weighted.sum(dim=1).unsqueeze(0)  # [1, prototypes]
+    #     x_p_weighted_interaction = torch.matmul(x_present, p_weighted.T)  # [batch, prototypes]
+    #     p_distinctive = p_weighted_sum - x_p_weighted_interaction  # [batch, prototypes]
 
-        return self.theta * common - self.alpha * x_distinctive - self.beta * p_distinctive
+    #     return self.theta * common - self.alpha * x_distinctive - self.beta * p_distinctive
