@@ -25,22 +25,3 @@ Features: 8 | Accuracy: 0.900±0.137 | Convergence: 0.600
 Features: 16 | Accuracy: 0.900±0.137 | Convergence: 0.600
 Features: 32 | Accuracy: 0.950±0.112 | Convergence: 0.800
 ```
-
-Not present in the paper is an experimental TverskyMultihead. This reduces the prototypes into chunks so each "head" is responsible for a subgroup of prototypes.  So 2 heads with 20 prototypes is 10 distinct prototypes per head. This maintains the ability to do XOR. This lets you increase the feature size but still keep the calculation tractable by subdividing over prototypes.
-
-```python
-uv run python XORTest-Multihead.py
-```
-
-```
-Features: 1 | Accuracy: 0.700±0.274 | Convergence: 0.400
-Features: 2 | Accuracy: 0.850±0.137 | Convergence: 0.400
-Features: 4 | Accuracy: 0.900±0.137 | Convergence: 0.600
-Features: 8 | Accuracy: 0.950±0.112 | Convergence: 0.800
-Features: 16 | Accuracy: 0.900±0.137 | Convergence: 0.600
-Features: 32 | Accuracy: 0.950±0.112 | Convergence: 0.800
-Features: 64 | Accuracy: 1.000±0.000 | Convergence: 1.000
-Features: 128 | Accuracy: 0.950±0.112 | Convergence: 0.800
-```
-
-

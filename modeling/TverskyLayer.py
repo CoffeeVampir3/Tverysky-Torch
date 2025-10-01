@@ -23,9 +23,12 @@ class TverskyLayer(nn.Module):
         torch.nn.init.uniform_(self.features, -.27, 1)
         torch.nn.init.uniform_(self.prototypes, -.27, 1)
 
+    # Shifted indicator, [~0, ~1] since we need a differntiable signal > 0 but binary mask is not such a thing.
+    # Should probably note, the paper just glosses over what actual indicator they used, but it's probably similar.
     def indicator(self, x, k=10.0):
         return (torch.tanh(k * (x - 0.5)) + 1) / 2
 
+    # For reference (unused)
     def fast_tversky_similarity(self, a, b):
         a_features = a @ self.features.T
         b_features = b @ self.features.T
