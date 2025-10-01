@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import time
 from modeling.TverskyLayer import TverskyLayer
 
@@ -11,16 +10,20 @@ def test_correctness():
     x = torch.randn(batch_size, input_dim)
 
     with torch.no_grad():
-        result_slow = layer.forward_bad_slow(x)
-        result_fast = layer.forward(x)
+        result_regular = layer.forward(x)
+        result_chunked = layer.forward_chunk(x, chunk_size=2)
 
-    max_diff = torch.max(torch.abs(result_slow - result_fast)).item()
-    all_close = torch.allclose(result_slow, result_fast, atol=1e-6)
+    max_diff = torch.max(torch.abs(result_regular - result_chunked)).item()
+    all_close = torch.allclose(result_regular, result_chunked, atol=1e-6)
 
-    print(f"Max diff: {max_diff:.2e}, Identical: {all_close}")
+    print(f"Max difference: {max_diff:.2e}")
+    print(f"Results match: {all_close}")
     return all_close
 
 def benchmark_speed():
+    print("\nSpeed Benchmark")
+    print("-" * 60)
+
     configs = [
         (32, 16, 10, 20),
         (128, 64, 50, 100),
@@ -41,26 +44,31 @@ def benchmark_speed():
 
         n_runs = 50 if batch_size <= 128 else 10
 
-        start_time = time.time()
+        start = time.time()
         for _ in range(n_runs):
             with torch.no_grad():
-                _ = layer.forward_bad_slow(x)
+                output_regular = layer.forward(x)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        slow_time = (time.time() - start_time) / n_runs
+        time_regular = (time.time() - start) / n_runs
 
-        start_time = time.time()
+        start = time.time()
         for _ in range(n_runs):
             with torch.no_grad():
-                _ = layer.forward(x)
+                output_chunked = layer.forward_chunk(x, chunk_size=16)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        fast_time = (time.time() - start_time) / n_runs
+        time_chunked = (time.time() - start) / n_runs
 
-        speedup = slow_time / fast_time if fast_time > 0 else float('inf')
-        print(f"Config {batch_size}x{input_dim}: {slow_time*1000:.2f}ms -> {fast_time*1000:.2f}ms ({speedup:.1f}x)")
+        print(f"\nBatch={batch_size}, Input={input_dim}, Proto={num_prototypes}, Feat={num_features}")
+        print(f"  forward()        : {time_regular*1000:6.2f} ms")
+        print(f"  forward_chunk()  : {time_chunked*1000:6.2f} ms")
+        print(f"  Speedup          : {time_regular/time_chunked:6.2f}x")
 
 def test_gradients():
+    print("\nGradient Test")
+    print("-" * 60)
+
     torch.manual_seed(42)
     input_dim, num_prototypes, num_features = 4, 3, 6
     layer1 = TverskyLayer(input_dim, num_prototypes, num_features, True)
@@ -70,30 +78,28 @@ def test_gradients():
     x = torch.randn(5, input_dim, requires_grad=True)
     target = torch.randn(5, num_prototypes)
 
-    out1 = layer1.forward_bad_slow(x)
-    out2 = layer2.forward(x)
-    loss1 = torch.mean((out1 - target)**2)
-    loss2 = torch.mean((out2 - target)**2)
-    loss1.backward()
-    loss2.backward()
+    out_regular = layer1.forward(x)
+    out_chunked = layer2.forward_chunk(x, chunk_size=2)
 
-    grad_diffs = []
+    loss_regular = torch.mean((out_regular - target)**2)
+    loss_chunked = torch.mean((out_chunked - target)**2)
+
+    loss_regular.backward()
+    loss_chunked.backward()
+
     for (name1, param1), (name2, param2) in zip(layer1.named_parameters(), layer2.named_parameters()):
         if param1.grad is not None and param2.grad is not None:
             diff = torch.max(torch.abs(param1.grad - param2.grad)).item()
-            grad_diffs.append(diff)
-            print(f"{name1}: {diff:.2e}")
-
-    max_grad_diff = max(grad_diffs) if grad_diffs else 0
-    print(f"Max grad diff: {max_grad_diff:.2e}")
-    return max_grad_diff < 1e-6
+            print(f"  {name1:12s}: {diff:.2e}")
 
 def memory_test():
+    print("\nMemory Test")
+    print("-" * 60)
+
     if not torch.cuda.is_available():
-        print("CUDA not available")
+        print("CUDA not available, skipping memory test")
         return
 
-    torch.cuda.empty_cache()
     batch_size, input_dim, num_prototypes, num_features = 256, 128, 100, 200
     layer = TverskyLayer(input_dim, num_prototypes, num_features, True).cuda()
     x = torch.randn(batch_size, input_dim).cuda()
@@ -101,22 +107,33 @@ def memory_test():
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     with torch.no_grad():
-        _ = layer.forward_bad_slow(x)
-    slow_memory = torch.cuda.max_memory_allocated()
+        output_regular = layer.forward(x)
+    mem_regular = torch.cuda.max_memory_allocated()
 
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     with torch.no_grad():
-        _ = layer.forward(x)
-    fast_memory = torch.cuda.max_memory_allocated()
+        output_chunked = layer.forward_chunk(x, chunk_size=16)
+    mem_chunked = torch.cuda.max_memory_allocated()
 
-    print(f"Memory: {slow_memory / 1024**2:.1f}MB -> {fast_memory / 1024**2:.1f}MB (ratio: {fast_memory / slow_memory:.2f})")
+    print(f"  forward()       : {mem_regular / 1024**2:6.1f} MB")
+    print(f"  forward_chunk() : {mem_chunked / 1024**2:6.1f} MB")
+    print(f"  Ratio           : {mem_chunked / mem_regular:6.2f}x")
 
 def main():
+    print("=" * 60)
+    print("Tversky Layer Benchmark")
+    print("=" * 60)
+
+    print("\nCorrectness Test")
+    print("-" * 60)
     test_correctness()
+
     benchmark_speed()
     test_gradients()
     memory_test()
+
+    print("\n" + "=" * 60)
 
 if __name__ == "__main__":
     main()

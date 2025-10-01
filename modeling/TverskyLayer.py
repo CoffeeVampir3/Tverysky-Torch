@@ -23,147 +23,92 @@ class TverskyLayer(nn.Module):
         torch.nn.init.uniform_(self.features, -.27, 1)
         torch.nn.init.uniform_(self.prototypes, -.27, 1)
 
-        # Recommended by paper
-        #torch.nn.init.uniform_(self.alpha, 0, 2)
-        #torch.nn.init.uniform_(self.beta, 0, 2)
-        #torch.nn.init.uniform_(self.theta, 0, 2)
+    def indicator(self, x, k=10.0):
+        return (torch.tanh(k * (x - 0.5)) + 1) / 2
 
-    # Use the vectorized method in forward, this is here for example only.
-    def tversky_similarity(self, a, b):
-        # Feature activations: how much each feature is present in each object
-        a_features = a @ self.features.T  # [batch, num_features]
-        b_features = b @ self.features.T  # [batch, num_features]
+    def fast_tversky_similarity(self, a, b):
+        a_features = a @ self.features.T
+        b_features = b @ self.features.T
 
-        # Binary presence: feature is "present" if activation > 0
-        a_present = torch.nn.functional.relu(a_features)
-        b_present = torch.nn.functional.relu(b_features)
+        diff = a_features - b_features  # [B, F]
 
-        # Set operations
-        both_present = a_present * b_present  # A ∩ B
-        a_only = a_present * (1 - b_present)  # A - B
-        b_only = b_present * (1 - a_present)  # B - A
+        both_pos = self.indicator(a_features) * self.indicator(b_features)
 
-        # Feature measures (Paper talks about using muliple possible methods of doing this probably should investigate.)
-        common = (a_features * b_features * both_present).sum(dim=1)
-        a_distinctive = (a_features * a_only).sum(dim=1)
-        b_distinctive = (b_features * b_only).sum(dim=1)
+        common = (a_features * b_features * both_pos).sum(dim=1)
+        a_distinctive = (diff * both_pos * self.indicator(diff)).sum(dim=1)
+        b_distinctive = ((-diff) * both_pos * self.indicator(-diff)).sum(dim=1)
 
-        # Tversky contrast model
         return self.theta * common - self.alpha * a_distinctive - self.beta * b_distinctive
 
-    # This is here for a reference modal on a literal implementation
-    def forward_bad_slow(self, x):
-        batch_size = x.size(0)
-        similarities = []
-
-        for proto in self.prototypes:
-            proto_batch = proto.unsqueeze(0).expand(batch_size, -1)
-            sim = self.tversky_similarity(x, proto_batch)
-            similarities.append(sim)
-
-        return torch.stack(similarities, dim=1)  # [batch, num_prototypes]
-
     def forward(self, x):
-        x_features = x @ self.features.T
-        x_present = F.softplus(x_features, beta=10)
-        x_weighted = x_features * x_present
+        B = x.size(0)
+        P = self.prototypes.size(0)
+        F = self.features.size(0)
 
-        if not self.use_cached_forward or self.training:
-            proto_features = self.prototypes @ self.features.T
-            proto_present = F.softplus(proto_features, beta=10)
-            proto_weighted = proto_features * proto_present
-            proto_sum = proto_weighted.sum(dim=1)
+        a_features = x @ self.features.T
+        p_features = self.prototypes @ self.features.T
 
-            fused_matrix = (self.theta + self.beta) * proto_weighted - self.alpha * proto_present
-        else:
-            if self.cached_matrix is None:
-                with torch.no_grad():
-                    proto_features = self.prototypes @ self.features.T
-                    proto_present = F.softplus(proto_features, beta=10)
-                    proto_weighted = proto_features * proto_present
-                    self.cached_proto_sum = proto_weighted.sum(dim=1)
-                    self.cached_matrix = (self.theta + self.beta) * proto_weighted - self.alpha * proto_present
+        a_ind = self.indicator(a_features)
+        p_ind = self.indicator(p_features)
 
-            fused_matrix = self.cached_matrix
-            proto_sum = self.cached_proto_sum
+        weighted_a = a_features * a_ind
+        weighted_p = p_features * p_ind
+        common = weighted_a @ weighted_p.T
 
-        result = x_weighted @ fused_matrix.T
+        a_exp = a_features.unsqueeze(1)
+        p_exp = p_features.unsqueeze(0)
+        a_ind_exp = a_ind.unsqueeze(1)
+        p_ind_exp = p_ind.unsqueeze(0)
 
-        x_sum = rearrange(x_weighted.sum(dim=1), 'b -> b 1')
-        proto_sum_broadcast = rearrange(proto_sum, 'p -> 1 p')
+        diff = a_exp - p_exp
+        both_pos = a_ind_exp * p_ind_exp
 
-        result = result - self.alpha * x_sum - self.beta * proto_sum_broadcast
+        a_distinctive = (diff * both_pos * self.indicator(diff)).sum(dim=2)
+        b_distinctive = ((-diff) * both_pos * self.indicator(-diff)).sum(dim=2)
 
-        return result # [batch, num_prototypes]
+        return self.theta * common - self.alpha * a_distinctive - self.beta * b_distinctive
 
-    # Original fast forward, has intermediates that are too large to be practical
-    # def forward(self, x):
-    #     batch_size, input_dim = x.shape
-    #     num_prototypes = self.prototypes.shape[0]
+    def forward_chunk(self, x, chunk_size=4):
+        B = x.size(0)
+        P = self.prototypes.size(0)
+        F = self.features.size(0)
 
-    #     # Expand for all pairwise comparisons
-    #     x_expanded = x.unsqueeze(1).expand(-1, num_prototypes, -1)  # [batch, num_prototypes, input_dim]
-    #     proto_expanded = self.prototypes.unsqueeze(0).expand(batch_size, -1, -1)  # [batch, num_prototypes, input_dim]
+        if chunk_size is None:
+            bytes_per_element = 4
+            target_bytes = 200 * 1024 * 1024
+            chunk_size = max(1, target_bytes // (B * F * bytes_per_element))
+            chunk_size = min(chunk_size, P)
 
-    #     # Feature activations for inputs and prototypes
-    #     x_features = torch.einsum('bpi,fi->bpf', x_expanded, self.features)  # [batch, num_prototypes, num_features]
-    #     p_features = torch.einsum('bpi,fi->bpf', proto_expanded, self.features)  # [batch, num_prototypes, num_features]
+        a_features = x @ self.features.T  # [B, F]
+        a_ind = self.indicator(a_features)  # [B, F]
 
-    #     # a · fk > 0
-    #     x_present = torch.nn.functional.relu(x_features)
-    #     p_present = torch.nn.functional.relu(p_features)
+        similarities = torch.empty(B, P, device=x.device, dtype=x.dtype)
 
-    #     # Set operations
-    #     both_present = x_present * p_present  # A ∩ B
-    #     x_only = x_present * (1 - p_present)  # A - B
-    #     p_only = p_present * (1 - x_present)  # B - A
+        for i in range(0, P, chunk_size):
+            chunk_end = min(i + chunk_size, P)
 
-    #     # Feature measures
-    #     common = (x_features * p_features * both_present).sum(dim=2)  # [batch, num_prototypes]
-    #     x_distinctive = (x_features * x_only).sum(dim=2)  # [batch, num_prototypes]
-    #     p_distinctive = (p_features * p_only).sum(dim=2)  # [batch, num_prototypes]
+            p_chunk = self.prototypes[i:chunk_end]
+            p_features = p_chunk @ self.features.T  # [C, F]
+            p_ind = self.indicator(p_features)  # [C, F]
 
-    #     # Tversky similarity for all pairs
-    #     return self.theta * common - self.alpha * x_distinctive - self.beta * p_distinctive
+            weighted_a = a_features * a_ind  # [B, F]
+            weighted_p = p_features * p_ind  # [C, F]
+            common = weighted_a @ weighted_p.T  # [B, C]
 
-    # Faster version, we need to then chunk this over the prototype dimension but this is much better.
-    # def forward(self, x):
-    #     batch_size = x.shape[0]
+            # Because gating depends on per-pair differences, distinctive terms still require element-wise ops
+            a_exp = a_features.unsqueeze(1)  # [B, 1, F]
+            p_exp = p_features.unsqueeze(0)  # [1, C, F]
+            a_ind_exp = a_ind.unsqueeze(1)   # [B, 1, F]
+            p_ind_exp = p_ind.unsqueeze(0)   # [1, C, F]
 
-    #     x_features = torch.matmul(x, self.features.T)  # [batch, features]
-    #     p_features = torch.matmul(self.prototypes, self.features.T)  # [prototypes, features]
-    #     x_present = F.relu(x_features)  # [batch, features]
-    #     p_present = F.relu(p_features)  # [prototypes, features]
+            diff = a_exp - p_exp  # [B, C, F]
+            both_pos = a_ind_exp * p_ind_exp  # [B, C, F]
 
-    #     # Reformulated to avoid materializing large tensors:
-    #     # Original: (x_features * p_features * both_present).sum(dim=2)
-    #     # where both_present = x_present * p_present (broadcasted to [batch, prototypes, features])
-    #     # Equivalent: sum_f(x_features[f] * p_features[f] * x_present[f] * p_present[f])
-    #     # = sum_f((x_features[f] * x_present[f]) * (p_features[f] * p_present[f]))
-    #     # = (x_features * x_present) @ (p_features * p_present).T
+            a_dist = (diff * both_pos * self.indicator(diff)).sum(dim=2)
+            b_dist = ((-diff) * both_pos * self.indicator(-diff)).sum(dim=2)
 
-    #     x_weighted = x_features * x_present  # [batch, features]
-    #     p_weighted = p_features * p_present  # [prototypes, features]
-    #     common = torch.matmul(x_weighted, p_weighted.T)  # [batch, prototypes]
+            similarities[:, i:chunk_end] = (
+                self.theta * common - self.alpha * a_dist - self.beta * b_dist
+            )
 
-    #     # Original: (x_features * x_only).sum(dim=2)
-    #     # where x_only = x_present * (1 - p_present) (broadcasted)
-    #     # = sum_f(x_features[f] * x_present[f] * (1 - p_present[f]))
-    #     # = sum_f(x_features[f] * x_present[f]) - sum_f(x_features[f] * x_present[f] * p_present[f])
-    #     # = x_weighted.sum(1) - (x_weighted @ p_present.T)
-
-    #     x_weighted_sum = x_weighted.sum(dim=1, keepdim=True)  # [batch, 1]
-    #     x_p_interaction = torch.matmul(x_weighted, p_present.T)  # [batch, prototypes]
-    #     x_distinctive = x_weighted_sum - x_p_interaction  # [batch, prototypes]
-
-    #     # Original: (p_features * p_only).sum(dim=2)
-    #     # where p_only = p_present * (1 - x_present) (broadcasted)
-    #     # = sum_f(p_features[f] * p_present[f] * (1 - x_present[f]))
-    #     # = sum_f(p_features[f] * p_present[f]) - sum_f(p_features[f] * p_present[f] * x_present[f])
-    #     # = p_weighted.sum(1) - (x_present @ p_weighted.T)
-
-    #     p_weighted_sum = p_weighted.sum(dim=1).unsqueeze(0)  # [1, prototypes]
-    #     x_p_weighted_interaction = torch.matmul(x_present, p_weighted.T)  # [batch, prototypes]
-    #     p_distinctive = p_weighted_sum - x_p_weighted_interaction  # [batch, prototypes]
-
-    #     return self.theta * common - self.alpha * x_distinctive - self.beta * p_distinctive
+        return similarities
