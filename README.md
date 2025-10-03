@@ -2,6 +2,15 @@
 
 This has an implementation of the Tversky Layer that replaces linears as outlined by the excellent paper: https://arxiv.org/pdf/2506.11035
 
+### ~
+
+XOR test: https://github.com/CoffeeVampir3/Tverysky-Torch
+
+Cifar10: https://github.com/CoffeeVampir3/Tversky-Cifar10/tree/main
+
+Language model: https://github.com/CoffeeVampir3/Architecture-Tversky-All
+
+### ~
 
 XOR Test on 15 seeds 1000 epochs per seed:
 ```python
@@ -18,7 +27,7 @@ beta -> uniform(0.001, 0.004),
 theta -> uniform(0.07, 0.13)
 ```
 
-Where the convergence is, out of the 15 random seeds, what percentage of networks arrived at 100% accuracy.
+Where the convergence is, out of the 15 random seeds, what percentage of networks arrived at 100% accuracy after 1000 epochs.
 Sample results:
 ```
 Features: 1 | Accuracy: 0.600±0.228 | Convergence: 0.000
