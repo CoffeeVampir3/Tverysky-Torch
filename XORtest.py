@@ -17,19 +17,22 @@ def test_tversky_xor():
 
     input_dim = 2
     num_prototypes = 2
-    feature_counts = [1, 2, 4, 8, 16, 32]
+    feature_counts = [1, 2, 4, 8, 16, 32, 64, 128]
     results = []
 
     for num_features in feature_counts:
         seed_results = []
         for seed in range(15):
             torch.manual_seed(seed)
+
             model = TverskyLayer(
                 input_dim,
                 num_prototypes,
                 num_features,
                 prototype_init=lambda x: torch.nn.init.uniform_(x, -0.15, 0.15),
-                feature_init=lambda x: torch.nn.init.uniform_(x, -0.10, 0.10),).to(device)
+                feature_init=lambda x: torch.nn.init.uniform_(x, -0.2, 0.2),
+                approximate_sharpness=13
+            ).to(device)
 
             optimizer = optim.Adam(model.parameters(), lr=0.01)
             criterion = nn.CrossEntropyLoss()
