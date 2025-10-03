@@ -43,10 +43,6 @@ class TverskyLayer(nn.Module):
         if self.prototype_init is not None:
             self.prototype_init(self.prototypes)
 
-        nn.init.uniform_(self.alpha, 0.004, 0.25)
-        nn.init.uniform_(self.beta, 0.001, 0.004)
-        nn.init.uniform_(self.theta, 0.07, 0.13)
-
     # Shifted indicator since we need a differentiable signal > 0 but binary mask is not such a thing.
     def indicator(self, x):
         sigma = (torch.tanh(self.approximate_sharpness * x) + 1) * 0.5
@@ -56,37 +52,20 @@ class TverskyLayer(nn.Module):
     # Ignorematch with Product intersections
     def forward(self, x):
         B = x.size(0)
-        P = self.prototypes.size(0)
 
-        A = x @ self.features.T                    # [B, F]
-        Pi = self.prototypes @ self.features.T     # [P, F]
+        # [B,d] @ [d,F] = [B,F] and [P,d] @ [d,F] = [P,F]
+        A = x @ self.features.T          # [B, F]
+        Pi = self.prototypes @ self.features.T  # [P, F]
 
-        weighted_A, sigma_A = self.indicator(A)
-        weighted_Pi, sigma_Pi = self.indicator(Pi)
+        sigma_A, weighted_A = self.indicator(A)      # [B, F]
+        sigma_Pi, weighted_Pi  = self.indicator(Pi)    # [P, F]
 
-        theta_val = self.theta.item()
-        alpha_val = self.alpha.item()
-        beta_val = self.beta.item()
+        common = weighted_A @ weighted_Pi.T            # [B,F] @ [F,P] = [B,P]
 
-        # theta * (weighted_A @ weighted_Pi.T)
-        result = torch.addmm(
-            torch.empty(B, P, device=x.device, dtype=x.dtype),
-            weighted_A, weighted_Pi.T,
-            beta=0, alpha=theta_val
-        )
+        # This is an approximation that will not distinguish highly similar features but
+        # is actually tractable for networks larger than a breadbox.
+        distinctive_A = weighted_A @ (1 - sigma_Pi).T  # [B,F] @ [F,P] = [B,P]
+        distinctive_B = (1 - sigma_A) @ weighted_Pi.T  # [B,F] @ [F,P] = [B,P]
 
-        # - alpha * (weighted_A @ (1 - sigma_Pi).T)
-        result = torch.addmm(
-            result,
-            weighted_A, (1 - sigma_Pi).T,
-            beta=1, alpha=-alpha_val
-        )
-
-        # beta * ((1 - sigma_A) @ weighted_Pi.T)
-        result = torch.addmm(
-            result,
-            (1 - sigma_A), weighted_Pi.T,
-            beta=1, alpha=-beta_val
-        )
-
-        return result
+        #  S = θ·C - α·D_A - β·D_B
+        return self.theta * common - self.alpha * distinctive_A - self.beta * distinctive_B # [B, P]
