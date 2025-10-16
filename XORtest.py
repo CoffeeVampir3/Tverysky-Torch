@@ -29,9 +29,7 @@ def test_tversky_xor():
                 input_dim,
                 num_prototypes,
                 num_features,
-                prototype_init=lambda x: torch.nn.init.uniform_(x, -0.15, 0.15),
-                feature_init=lambda x: torch.nn.init.uniform_(x, -0.2, 0.2),
-                approximate_sharpness=13
+                approximate_sharpness=3
             ).to(device)
 
             optimizer = optim.Adam(model.parameters(), lr=0.01)
